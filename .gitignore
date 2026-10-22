@@ -2,3 +2,5 @@ data/
 data/ejscreen
 data/SWITRS_LA
 data/mapping-inequality
+/.quarto/
+**/*.quarto_ipynb

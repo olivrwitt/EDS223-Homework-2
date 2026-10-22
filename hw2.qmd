@@ -5,6 +5,7 @@ Author: Oliver Witt
 ---
 
 ## Preliminary Steps
+Load the packages we will need for analysis.
 ```{r}
 # Load necessary packages
 library(tidyverse)
@@ -13,6 +14,7 @@ library(sf)
 library(tmap)
 ```
 
+Load in the HOLC (redlining), EJScreen, and SWITRS (crashes) data.
 ```{r}
 # Load/read in the necessary data
 ejscreen <- st_read("data/ejscreen/EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")
@@ -25,27 +27,37 @@ holc <- st_read("data/ejscreen/mapping-inequality/mapping-inequality-los-angeles
 
 ### (a). Create a map of historical redlining neighborhoods
 
+Filter to only Los Angeles County data (our area of interest).
 ```{r}
 # Filter to data of interest
 la <- ejscreen |> 
       dplyr::filter(CNTY_NAME == "Los Angeles County") 
+    # Only entries in LA County
 la_shape <- st_as_sf(la)
 holc_shape <- st_as_sf(holc)
+# Save data as spatial for plotting
 ```
 
+Map Los Angeles County's historical redlining "grades".
 ```{r}
 # Make the map!
-tmap_mode("view")
-la_map <- tm_shape(la_shape) +
-    tm_polygons() +
-    tm_shape(holc_shape) +
+tmap_mode("plot")
+la_map <- tm_shape(holc_shape) +
     tm_polygons(fill = "grade", fill.legend = tm_legend(title = "HOLC Grade")) +
-    tm_title(text = "HOLC Redlining Grades for Los Angeles County", size = 1.1, fontface = "bold", position = tm_pos_out("center", "top"), frame = TRUE)
+    tm_title(text = "HOLC Redlining Grades for Los Angeles County", size = 1.1, fontface = "bold", position = tm_pos_out("center", "top"), frame = TRUE) +
+    tm_basemap("OpenStreetMap") +
+    # Choose a base map
+    tm_graticules() +
+    tm_scalebar(position = tm_pos_in("right", "bottom")) +
+    tm_compass(position = tm_pos_in("right", "top"))
+    # Add compass, scale bar, scale lines
 la_map
 ```
 
+
 ### (b). Table summarizing the percentage of census block groups that fall within each HOLC grade
 
+First, spatially combine the EJScreen and HOLC (redlining) data so that we can look at the percentage of census block groups in Los Angeles County that fall into each of the different HOLC grades.
 ```{r}
 # First we need to combine the EJScreen and HOLC data spatially
 # We need to make sure the CRS match!
@@ -77,17 +89,20 @@ ej_and_holc <- st_join(la, holc_transformed, join = st_intersects)
 ej_and_holc <- st_drop_geometry(ej_and_holc)
 ```
 
+With the HOLC and EJScreen datasets joined, the next step is to summarize the percentage of census block groups that fall within each HOLC grade.
 ```{r}
 # Make summary table
 summ_table <- ej_and_holc |> 
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
+    # Calculate the percentages in each grade
 print(summ_table)
 ```
 
 
 ### (c). Visualizations summarizing current conditions within HOLC grades for % low income, percentile for Particulate Matter 2.5, and percentile for low life expectancy
 
+With the EJScreen and HOLC (redlining) data spatially joined, we can look at various environmental justice variables (PM2.5 exposure, low income areas, and life expectancy) across the different HOLC grades.
 ```{r}
 # First take the means of these variables, grouped by HOLC grade
 holc_vars_summ <- ej_and_holc |> 
@@ -95,6 +110,7 @@ holc_vars_summ <- ej_and_holc |>
     summarize(mean(P_LOWINCPCT, na.rm = TRUE), mean(P_PM25, na.rm = TRUE), mean(P_LIFEEXPPCT, na.rm = TRUE))
 ```
 
+Using ggplot, create a scatterplot as well as barplots of the mean percentile for each of these three variables (PM2.5 exposure, low income areas, and life expectancy) within each HOLC grade.
 ```{r}
 # Visualize as a scatterplot!
 # Need to pivot longer first so we have one row per grade/variable combo
@@ -105,15 +121,20 @@ holcvars_long <- holc_vars_summ |>
     values_to = "percentile"
   )
 
-ggplot(holcvars_long, aes(x = grade, y = percentile, color = variable)) +
+# Plot a scatterplot using ggplot
+ggplot(holcvars_long, aes(
+        x = grade,
+        y = percentile,
+        color = variable)) +
     geom_point() +
     scale_color_discrete(
+    # Color by variable
         labels = c(
             `mean(P_LOWINCPCT, na.rm = TRUE)` = "% Low Income", 
             `mean(P_PM25, na.rm = TRUE)` = "PM2.5 Exposure", 
             `mean(P_LIFEEXPPCT, na.rm = TRUE)` = "Life Expectancy")
     ) +
-    labs(x = "HOLC Grade", y = "Percentile", color = NULL)
+    labs(x = "HOLC (Redlining) Grade", y = "Mean Percentile Value Across Census Tracts", color = NULL, title = "Environmental Justice Legacy of Historical Redlining in LA County")
 ```
 
 ```{r}
@@ -152,19 +173,26 @@ lowinc_plot
 Based on these visualizations, it appears that the average (mean) percentile across all three variables (percent low income, percentile for particulate matter 2.5, and percentile for low life expectancy) increases as the grade decreases (i.e. areas with grade "D" will tend to be in a higher percentile for low income %, PM2.5, and low life expectancy than areas with an "A" grade).  This trend is observed similarly across all three variables.  This trend is likely a result of historical redlining, as these visualizations show that "redlined" areas now display a lower average life expectancy, lower average income, and more PM2.5 air pollution.  In this way, the discriminatory legacy of historical redlining persists today through these variables.
 
 
+
+
 ## Part 2: Legacy of redlining in pedstrian and bike accidents
 ### (a).  Figure summarizing the percent of observations within redlined neighborhoods within each HOLC grade
 
+Before any visualization can happen, we need to join the HOLC (redlining "grades") data with the SWITRS (crashes) dataset.
 ```{r}
 # We need to join the HOLC data with the crashes data
-# "Crashes" is not spatial data, so we do not need to worry about CRS matching
+# "Crashes" is not spatial data, so we do not need to worry about CRS matching right now
 
 # To join "crashes" to "holc", we need to combine the latitude/longitude columns in "crashes",
 # and convert it to a spatial object
 # We also need to drop NAs!
 crash_clean <- crashes |> 
     filter(!is.na(POINT_X), !is.na(POINT_Y))
+    # Filter to only rows where the coordinates do not contain NA values
+    # POINT_X and POINT_Y have less NA values than the lat/long columns
 latlong <- st_as_sf(crash_clean, coords = c("POINT_X", "POINT_Y"), crs = st_crs(holc))
+# Create spatial data by combining the coordinates
+# And set CRS to that of the HOLC data
 ```
 ```{r}
 # Now we check that the CRS match
@@ -180,8 +208,8 @@ holc <- st_make_valid(holc)
 holc_and_crash <- st_join(latlong, holc, join = st_within)
 ```
 
+After joining the data, we can look at the percentage of total crashes that fall within each HOLC grade.
 ```{r}
-# Now that we have joined data, we can visualize
 # We can now drop geometry
 holc_and_crash <- st_drop_geometry(holc_and_crash)
 
@@ -189,27 +217,34 @@ holc_and_crash <- st_drop_geometry(holc_and_crash)
 crash_summ <- holc_and_crash |> 
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
+```
 
-# Based on this table, it appears that the majority of crashes occur in areas given an "NA" grade
+Based on this table, it appears that the majority of crashes occur in areas given an "NA" grade - therefore, it will be helpful to drop NA values before continuing.
+```{r}
 # We may need to drop NAs to make the data cleaner
 crash_summ_no_na <- holc_and_crash |> 
     filter(!is.na(grade)) |> 
+    # Remove NA values
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
 
 crash_summ_no_na
-
-# After removing NAs, it seems that the majority (53%) of observations in the "crashes" dataset occur in areas given the HOLC grade "C"
 ```
 
+
+After removing NAs, it seems that the majority (53%) of observations in the "crashes" dataset occur in areas given the HOLC grade "C".  Looking at specific crash types (bike incidents, pedestrian incidents, and fatal crashes), this pattern holds true.
 ```{r}
 # Looking specifically at bike crashes
 bike_crashes <- holc_and_crash |> 
     filter(BICYCLE_ACCIDENT == "Y")
+    # Filter to only bike incidents 
+    # (i.e. where the value in the "BICYCLE_ACCIDENT" column is "Y")
 bike_summ <- bike_crashes |> 
     filter(!is.na(grade)) |> 
+    # Remove NA values
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
+    # What percentage falls in each grade?
 bike_summ
 ```
 
@@ -217,10 +252,13 @@ bike_summ
 # Looking specifically at pedestrian crashes
 ped_crashes <- holc_and_crash |> 
     filter(PEDESTRIAN_ACCIDENT == "Y")
+   # Filter to only pedestrian incidents
 ped_summ <- ped_crashes |> 
     filter(!is.na(grade)) |> 
+    # Remove NA values
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
+    # What percentage falls in each grade?
 ped_summ
 ```
 
@@ -228,14 +266,20 @@ ped_summ
 # Looking specifically at fatalities
 fatal_crashes <- holc_and_crash |> 
     filter(NUMBER_KILLED >= 1.00)
+    # Filter to only fatal incidents 
+    # (i.e. where "NUMBER_KILLED" is greater than or equal to 1)
 fatal_summ <- fatal_crashes |> 
     filter(!is.na(grade)) |> 
+    # Remove NA values
     count(grade) |> 
     mutate(percentage = round(n / sum(n) * 100, 1))
+    # What percentage falls in each grade?
 fatal_summ
 ```
 
 Across all three of these categories (bike crashes, pedestrian crashes, and fatal crashes), the majority of incidents (54%-58%) occur in areas with a HOLC grade of "C", followed by "D" (28%-31%), then "B" (11%-13%) and finally "A" (1%-3%).  Therefore, the number of incidents mostly increases with decreasing grade, with the exception of "C" graded areas, which have a higher number of incidents than "D". 
+
+Finally, the summarized data can be visualized as a scatterplot using ggplot.
 
 ```{r}
 # Now that the data is clear, we can use ggplot to visualize it
@@ -243,15 +287,17 @@ Across all three of these categories (bike crashes, pedestrian crashes, and fata
 # And then combine the summary tables into one table
 bike_summ <- bike_summ |> 
     mutate("crash_type" = "Bike")
+    # Add a "crash_type" column so that we can differentiate between types once the data is joined
 ped_summ <- ped_summ |> 
     mutate("crash_type" = "Pedestrian")
 fatal_summ <- fatal_summ |> 
     mutate("crash_type" = "Fatal")
 bike_ped_fatal <- bind_rows(ped_summ, bike_summ, fatal_summ)
+# Create a data frame of all 3 crash types within HOLC grades
 
 # Finally we can plot the data!
 crash_plot <- ggplot(bike_ped_fatal, aes(x = grade, y = percentage, color = crash_type)) +
     geom_point() +
-    labs(x = "HOLC Grade", y = "Percentage of Crash Incidents", title = "Percentage of 2020-2025 LA Crash Incidents in Each HOLC Grade", color = "Crash Type") 
+    labs(x = "HOLC Grade", y = "Percentage of Total Crash Incidents", title = "Percentage of 2020-2025 LA Crash Incidents by HOLC Redlining Grade", color = "Crash Type") 
 crash_plot
 ```
